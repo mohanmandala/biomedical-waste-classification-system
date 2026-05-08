@@ -14,7 +14,8 @@ from flask_socketio import SocketIO, emit
 import os, io, base64, csv, datetime, logging, sqlite3, threading
 from PIL import Image
 import numpy as np
-
+from download_model import download_model
+download_model()
 # ──────────────────────────────────────────────
 #  App Init
 # ──────────────────────────────────────────────
