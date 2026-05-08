@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>BioWaste AI Monitor — Dashboard</title>
+
+  <!-- External libraries -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+
+  <!-- App stylesheets -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}"/>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}"/>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════
+     TOPBAR
+════════════════════════════════════════════ -->
+<nav class="topbar">
+  <div class="brand">
+    <div class="brand-icon">🏥</div>
+    <div class="brand-name"><span>BioWaste</span> AI</div>
+  </div>
+
+  <div class="topbar-nav">
+    <a href="/" class="nav-btn active">📡 Live Detection</a>
+    <a href="/analytics" class="nav-btn">📊 Analytics</a>
+  </div>
+
+  <div class="topbar-right">
+    <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text2)">
+      <div class="ws-dot" id="wsDot"></div>
+      <span id="wsLabel">Connecting…</span>
+    </div>
+    
+  </div>
+</nav>
+
+<!-- Toast container -->
+<div class="toast-wrap" id="toasts"></div>
+
+<!-- ══════════════════════════════════════════
+     MAIN GRID
+════════════════════════════════════════════ -->
+<div class="main">
+
+  <!-- ════════ LEFT PANEL ════════ -->
+  <div class="left-panel">
+
+    <!-- Camera Section -->
+    <div>
+      <div class="sec-label">🎥 Live Camera</div>
+      <div class="camera-card">
+
+        <!-- Video Feed -->
+        <div class="camera-wrapper" id="cameraWrapper">
+          <video id="videoEl" autoplay muted playsinline></video>
+          <canvas id="canvasEl"></canvas>
+
+          <div class="cam-placeholder" id="camPlaceholder">
+            <div class="ph-icon">📷</div>
+            <span>Camera not started</span>
+            <small>Click Start Camera below to begin</small>
+          </div>
+
+          <div class="cam-overlay" id="camOverlay">
+            <div class="scan-line"></div>
+            <div class="corner tl"></div>
+            <div class="corner tr"></div>
+            <div class="corner bl"></div>
+            <div class="corner br"></div>
+            <div class="live-badge"><div class="live-dot"></div>LIVE</div>
+            <div class="motion-badge idle" id="motionBadge">MOTION: —</div>
+          </div>
+        </div>
+
+        <!-- Motion level bar (visible only when Auto is ON) -->
+        <div class="motion-bar-wrap" id="motionBarWrap">
+          <label>
+            <span>Motion Level</span>
+            <span id="motionPct">0%</span>
+          </label>
+          <div class="motion-bar">
+            <div class="motion-fill" id="motionFill"></div>
+            <div class="motion-threshold" id="motionThreshold" style="left:20%"></div>
+          </div>
+        </div>
+
+        <!-- Row 1: Start | Stop | Predict Once -->
+        <div class="btn-row-1">
+          <button class="cbtn cbtn-start"   id="btnStart"   onclick="startCamera()">📷 Start Camera</button>
+          <button class="cbtn cbtn-stop"    id="btnStop"    onclick="stopCamera()"  disabled>⏹ Stop</button>
+          <button class="cbtn cbtn-predict" id="btnPredict" onclick="predictOnce()" disabled>🔍 Predict Once</button>
+        </div>
+
+        <!-- Row 2: Auto Predict | Auto Stop -->
+        <div class="btn-row-2">
+          <button class="cbtn cbtn-auto auto-off" id="btnAuto"     onclick="toggleAuto()" disabled>🤖 Auto Predict</button>
+          <button class="cbtn cbtn-autostop"       id="btnAutoStop" onclick="stopAuto()"   disabled>🛑 Auto Stop</button>
+        </div>
+
+      </div><!-- /camera-card -->
+    </div>
+
+    <!-- Upload Section -->
+    <div>
+      <div class="sec-label">📁 Image Upload</div>
+      <div class="upload-zone" id="uploadZone"
+           onclick="document.getElementById('fileInput').click()"
+           ondragover="onDragOver(event)"
+           ondrop="onDrop(event)"
+           ondragleave="this.classList.remove('drag-over')">
+        <div class="up-icon">🖼️</div>
+        <div style="font-weight:700;font-size:13px">Drop image or click to upload</div>
+        <p>JPG · PNG · WEBP · Max 16 MB</p>
+        <img id="previewImg" alt="Preview"/>
+        <input type="file" id="fileInput" accept="image/*" onchange="onFileSelect(event)"/>
+      </div>
+      <div class="upload-actions">
+        <button class="ubtn ubtn-analyse" id="btnUpload" onclick="predictFromFile()" disabled>🔬 Analyse Image</button>
+        <button class="ubtn ubtn-clear"                  onclick="clearUpload()">🗑️ Clear</button>
+      </div>
+    </div>
+
+    <!-- Model Info Pills -->
+    <div class="info-pills">
+      <div class="info-pill">
+        <div class="pill-label">Model</div>
+        <div class="pill-val">{{ model_version }}</div>
+      </div>
+      <div class="info-pill">
+        <div class="pill-label">Input</div>
+        <div class="pill-val">224×224 RGB</div>
+      </div>
+      <div class="info-pill">
+        <div class="pill-label">Threshold</div>
+        <div class="pill-val">60%</div>
+      </div>
+      <div class="info-pill">
+        <div class="pill-label">Auto Status</div>
+        <div class="pill-val" id="autoStatusPill">OFF</div>
+      </div>
+    </div>
+
+  </div><!-- /left-panel -->
+
+  <!-- ════════ RIGHT PANEL ════════ -->
+  <div class="right-panel">
+
+    <!-- Detection Result -->
+    <div class="result-section">
+      <div class="sec-label">🔬 Detection Result</div>
+
+      <!-- Empty state -->
+      <div class="result-card empty" id="resultEmpty">
+        <div style="font-size:36px;opacity:.35">🧬</div>
+        <div style="font-weight:700">No prediction yet</div>
+        <div style="font-size:11px;opacity:.55">Start camera or upload an image</div>
+      </div>
+
+      <!-- Result state -->
+      <div class="result-card" id="resultCard" style="display:none">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
+          <div>
+            <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Detected Class</div>
+            <div class="result-class" id="resClass">—</div>
+            <div class="result-meta">
+              <span id="resIcon"></span>
+              <span style="font-size:11px;color:var(--text2)" id="resDesc"></span>
+              <span class="risk-badge" id="resBadge"></span>
+            </div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Confidence</div>
+            <div class="conf-pct" id="resConf">—</div>
+          </div>
+        </div>
+        <div class="conf-bar"><div class="conf-fill" id="confFill" style="width:0%"></div></div>
+        <div class="conf-warning" id="confWarn"    style="display:none">⚠️ Low confidence — verify manually</div>
+        <div class="alert-banner" id="alertBanner" style="display:none"></div>
+        <div class="all-probs"    id="allProbs"></div>
+        <div class="res-time"     id="resTime"></div>
+      </div>
+    </div>
+
+    <!-- Detection History -->
+    <div class="history-section">
+      <div class="hist-header">
+        <span class="hist-title">📋 Detection History</span>
+        <span class="hist-count" id="histCount">0 records</span>
+      </div>
+      <div class="filter-row">
+        <button class="fchip active" onclick="filterHist(null,this)">All</button>
+        <button class="fchip" onclick="filterHist('blue',this)"      style="color:#60A5FA">🔵 Blue</button>
+        <button class="fchip" onclick="filterHist('red',this)"       style="color:#F87171">🔴 Red</button>
+        <button class="fchip" onclick="filterHist('yellow',this)"    style="color:#FDE047">🟡 Yellow</button>
+        <button class="fchip" onclick="filterHist('white',this)"     style="color:#CBD5E1">⚪ White</button>
+        <button class="fchip" onclick="filterHist('non_waste',this)" style="color:#86EFAC">🟢 Non-Waste</button>
+      </div>
+      <div class="hist-list" id="histList">
+        <div class="hist-empty">Loading history…</div>
+      </div>
+    </div>
+
+  </div><!-- /right-panel -->
+</div><!-- /main -->
+
+<!-- ══════════════════════════════════════════
+     Inject Flask data for JS, then load script
+════════════════════════════════════════════ -->
+<script>
+  // Make Flask template variables available to the external JS file
+  window.CLASS_INFO = {{ class_info | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+
+</body>
+</html>

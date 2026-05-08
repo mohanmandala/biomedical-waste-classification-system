@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>BioWaste AI — Analytics</title>
+
+  <!-- External libraries -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+
+  <!-- App stylesheets -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}"/>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/analytics.css') }}"/>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════
+     TOPBAR
+════════════════════════════════════════════ -->
+<nav class="topbar">
+  <div class="topbar-brand">
+    <div class="brand-icon">🏥</div>
+    <div class="brand-name"><span>BioWaste</span> AI Monitor</div>
+  </div>
+  <div class="topbar-nav">
+    <a href="/" class="nav-btn">📡 Live Detection</a>
+    <a href="/analytics" class="nav-btn active">📊 Analytics</a>
+  </div>
+  <div class="topbar-right">
+    
+  </div>
+</nav>
+
+<!-- Toast container -->
+<div class="toast-container" id="toasts"></div>
+
+<!-- ══════════════════════════════════════════
+     PAGE CONTENT
+════════════════════════════════════════════ -->
+<div class="page">
+
+  <!-- Page Header -->
+  <div class="page-header">
+    <div>
+      <div class="page-title">📊 Analytics Dashboard</div>
+      <div class="page-subtitle">Biomedical waste detection insights and compliance reporting</div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-success" onclick="exportCSV()">⬇️ Export CSV</button>
+      {% if role == 'admin' %}
+      <button class="btn btn-danger" onclick="confirmDelete()">🗑️ Clear History</button>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- KPI Cards -->
+  <div class="kpi-grid">
+    <div class="kpi-card blue">
+      <div class="kpi-label">Total Detections</div>
+      <div class="kpi-value" id="kpiTotal">—</div>
+      <div class="kpi-sub">All time</div>
+      <div class="kpi-icon">🔬</div>
+    </div>
+    <div class="kpi-card green">
+      <div class="kpi-label">Today</div>
+      <div class="kpi-value" id="kpiToday">—</div>
+      <div class="kpi-sub">Detections today</div>
+      <div class="kpi-icon">📅</div>
+    </div>
+    <div class="kpi-card red">
+      <div class="kpi-label">High Risk</div>
+      <div class="kpi-value" id="kpiHighRisk">—</div>
+      <div class="kpi-sub">Red + White bags</div>
+      <div class="kpi-icon">⚠️</div>
+    </div>
+    <div class="kpi-card yellow">
+      <div class="kpi-label">Top Class</div>
+      <div class="kpi-value" id="kpiTopClass" style="font-size:22px;margin-top:4px">—</div>
+      <div class="kpi-sub" id="kpiTopClassSub">Most detected</div>
+      <div class="kpi-icon">🏆</div>
+    </div>
+    <div class="kpi-card purple">
+      <div class="kpi-label">Avg Confidence</div>
+      <div class="kpi-value" id="kpiAvgConf">—</div>
+      <div class="kpi-sub">Across all predictions</div>
+      <div class="kpi-icon">🎯</div>
+    </div>
+  </div>
+
+  <!-- Charts -->
+  <div class="charts-grid">
+
+    <!-- Doughnut: Category Distribution -->
+    <div class="chart-card">
+      <div class="chart-header">
+        <div>
+          <div class="chart-title">Category Distribution</div>
+          <div class="chart-subtitle">Waste type breakdown</div>
+        </div>
+      </div>
+      <div class="chart-container"><canvas id="doughnutChart"></canvas></div>
+    </div>
+
+    <!-- Line: Daily Trend -->
+    <div class="chart-card">
+      <div class="chart-header">
+        <div>
+          <div class="chart-title">Daily Detection Trend</div>
+          <div class="chart-subtitle">Detections over time</div>
+        </div>
+        <div class="days-selector">
+          <button class="day-btn"        onclick="loadTrend(7, this)"> 7d</button>
+          <button class="day-btn active" onclick="loadTrend(14,this)">14d</button>
+          <button class="day-btn"        onclick="loadTrend(30,this)">30d</button>
+        </div>
+      </div>
+      <div class="chart-container"><canvas id="lineChart"></canvas></div>
+    </div>
+
+    <!-- Bar: Avg Confidence (wide) -->
+    <div class="chart-card wide">
+      <div class="chart-header">
+        <div>
+          <div class="chart-title">Average Confidence by Class</div>
+          <div class="chart-subtitle">Model confidence per waste category</div>
+        </div>
+      </div>
+      <div class="chart-container"><canvas id="barChart"></canvas></div>
+    </div>
+
+  </div>
+
+  <!-- Per-Class Performance Table -->
+  <div class="report-card">
+    <div class="report-header">
+      <h3>📋 Per-Class Performance Report</h3>
+      <span style="font-size:12px;color:var(--text2)" id="reportUpdated">Loading…</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Waste Class</th>
+          <th>Description</th>
+          <th>Risk Level</th>
+          <th>Total Detected</th>
+          <th>Avg Confidence</th>
+        </tr>
+      </thead>
+      <tbody id="classTable">
+        <tr>
+          <td colspan="5">
+            <div class="loading">
+              <div class="spinner"></div> Loading data…
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</div><!-- /page -->
+
+<!-- ══════════════════════════════════════════
+     Inject Flask data for JS, then load script
+════════════════════════════════════════════ -->
+<script>
+  window.CLASS_INFO = {{ class_info | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/analytics.js') }}"></script>
+
+</body>
+</html>
